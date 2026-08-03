@@ -32,4 +32,14 @@ jobs:
           rm cmdline-tools.zip
           mv cmdline-tools latest
 
+      - name: Accept licenses and install SDK components
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" \
+            "platforms;android-37" \
+            "build-tools;34.0.0" \
+            "ndk;28.0.13003508" \
+            "cmake;3.22.1"
+
       - run: echo "hello"
