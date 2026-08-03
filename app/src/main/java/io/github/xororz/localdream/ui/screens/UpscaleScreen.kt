@@ -21,6 +21,8 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -87,6 +89,10 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
     var tileProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val tileRegex = remember { Regex("""Processed tile (\d+)/(\d+)""") }
 
+    var imageQueue by remember { mutableStateOf<List<UpscaleImageItem>>(emptyList()) }
+    var currentBatchIndex by remember { mutableIntStateOf(0) }
+    var batchInProgress by remember { mutableStateOf(false) }
+
     var sharedScale by remember { mutableFloatStateOf(1f) }
     var sharedOffsetX by remember { mutableFloatStateOf(0f) }
     var sharedOffsetY by remember { mutableFloatStateOf(0f) }
@@ -126,41 +132,50 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
     val msgUnknownError = stringResource(R.string.unknown_error)
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent(),
-    ) { uri: Uri? ->
-        uri?.let {
+        contract = ActivityResultContracts.GetMultipleContents(),
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
             scope.launch(Dispatchers.IO) {
-                try {
-                    val bitmap = context.contentResolver.openInputStream(it)?.use { stream ->
-                        BitmapFactory.decodeStream(stream)
-                    }
+                val newItems = mutableListOf<UpscaleImageItem>()
+                for (uri in uris) {
+                    try {
+                        val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+                            BitmapFactory.decodeStream(stream)
+                        }
+                        if (bitmap != null) {
+                            val totalPixels = bitmap.width.toLong() * bitmap.height.toLong()
+                            val maxPixels = 2048L * 2048L
+                            val enforceMaxPixels = BuildConfig.FLAVOR == "filter"
 
-                    if (bitmap != null) {
-                        val totalPixels = bitmap.width.toLong() * bitmap.height.toLong()
-                        val maxPixels = 2048L * 2048L
-                        val enforceMaxPixels = BuildConfig.FLAVOR == "filter"
-
-                        if (enforceMaxPixels && totalPixels > maxPixels) {
-                            withContext(Dispatchers.Main) {
-                                errorMessage = msgImageResolutionTooLarge.format(
-                                    bitmap.width,
-                                    bitmap.height,
-                                )
-                            }
-                        } else {
-                            selectedImageUri = it
-                            selectedBitmap = bitmap
-                            withContext(Dispatchers.Main) {
-                                sharedScale = 1f
-                                sharedOffsetX = 0f
-                                sharedOffsetY = 0f
+                            if (enforceMaxPixels && totalPixels > maxPixels) {
+                                withContext(Dispatchers.Main) {
+                                    errorMessage = msgImageResolutionTooLarge.format(
+                                        bitmap.width,
+                                        bitmap.height,
+                                    )
+                                }
+                            } else {
+                                newItems.add(UpscaleImageItem(uri = uri, bitmap = bitmap))
                             }
                         }
+                    } catch (e: Exception) {
+                        Log.e("UpscaleScreen", "Failed to load image: $uri", e)
                     }
-                } catch (e: Exception) {
-                    Log.e("UpscaleScreen", "Failed to load image", e)
+                }
+                if (newItems.isNotEmpty()) {
                     withContext(Dispatchers.Main) {
-                        errorMessage = msgFailedToLoadImage.format(e.message ?: "")
+                        imageQueue = imageQueue + newItems
+                        if (currentBatchIndex >= imageQueue.size) {
+                            currentBatchIndex = imageQueue.size - 1
+                        }
+                        val current = imageQueue[currentBatchIndex]
+                        selectedImageUri = current.uri
+                        selectedBitmap = current.bitmap
+                        upscaledImageUri = current.resultUri
+                        upscaledBitmap = current.resultBitmap
+                        sharedScale = 1f
+                        sharedOffsetX = 0f
+                        sharedOffsetY = 0f
                     }
                 }
             }
@@ -379,6 +394,100 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                if (imageQueue.isNotEmpty()) {
+                    LazyRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(imageQueue.size) { index ->
+                            val item = imageQueue[index]
+                            val isSelected = index == currentBatchIndex
+                            Card(
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .clickable(enabled = !isUpscaling) {
+                                        currentBatchIndex = index
+                                        selectedImageUri = item.uri
+                                        selectedBitmap = item.bitmap
+                                        upscaledImageUri = item.resultUri
+                                        upscaledBitmap = item.resultBitmap
+                                        sharedScale = 1f
+                                        sharedOffsetX = 0f
+                                        sharedOffsetY = 0f
+                                    },
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceContainerHighest
+                                    },
+                                ),
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    AsyncImage(
+                                        model = item.uri,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                    if (item.resultBitmap != null) {
+                                        Icon(
+                                            imageVector = Icons.Default.AutoFixHigh,
+                                            contentDescription = stringResource(R.string.upscale),
+                                            modifier = Modifier
+                                                .size(16.dp)
+                                                .align(Alignment.TopEnd)
+                                                .padding(4.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                    FilledTonalIconButton(
+                                        onClick = {
+                                            imageQueue = imageQueue.toMutableList().also {
+                                                it.removeAt(index)
+                                            }
+                                            if (imageQueue.isEmpty()) {
+                                                selectedImageUri = null
+                                                selectedBitmap = null
+                                                upscaledImageUri = null
+                                                upscaledBitmap = null
+                                                currentBatchIndex = 0
+                                            } else if (currentBatchIndex >= imageQueue.size) {
+                                                currentBatchIndex = imageQueue.size - 1
+                                                val current = imageQueue[currentBatchIndex]
+                                                selectedImageUri = current.uri
+                                                selectedBitmap = current.bitmap
+                                                upscaledImageUri = current.resultUri
+                                                upscaledBitmap = current.resultBitmap
+                                            } else if (index == currentBatchIndex) {
+                                                val current = imageQueue[currentBatchIndex]
+                                                selectedImageUri = current.uri
+                                                selectedBitmap = current.bitmap
+                                                upscaledImageUri = current.resultUri
+                                                upscaledBitmap = current.resultBitmap
+                                            }
+                                        },
+                                        enabled = !isUpscaling,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .padding(2.dp)
+                                            .size(20.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = stringResource(R.string.remove),
+                                            modifier = Modifier.size(12.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
                 ElevatedCard(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -389,7 +498,7 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
                         modifier = Modifier
                             .fillMaxSize()
                             .then(
-                                if (selectedImageUri == null) {
+                                if (selectedImageUri == null && imageQueue.isEmpty()) {
                                     Modifier.clickable { imagePickerLauncher.launch("image/*") }
                                 } else {
                                     Modifier
@@ -445,15 +554,37 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
                             )
                         }
 
-                        if (selectedImageUri != null) {
+                        if (selectedImageUri != null && imageQueue.isNotEmpty()) {
                             FilledTonalIconButton(
                                 onClick = {
-                                    selectedImageUri = null
-                                    selectedBitmap = null
+                                    imageQueue = imageQueue.toMutableList().also {
+                                        it.removeAt(currentBatchIndex)
+                                    }
+                                    if (imageQueue.isEmpty()) {
+                                        selectedImageUri = null
+                                        selectedBitmap = null
+                                        upscaledImageUri = null
+                                        upscaledBitmap = null
+                                        currentBatchIndex = 0
+                                    } else if (currentBatchIndex >= imageQueue.size) {
+                                        currentBatchIndex = imageQueue.size - 1
+                                        val current = imageQueue[currentBatchIndex]
+                                        selectedImageUri = current.uri
+                                        selectedBitmap = current.bitmap
+                                        upscaledImageUri = current.resultUri
+                                        upscaledBitmap = current.resultBitmap
+                                    } else {
+                                        val current = imageQueue[currentBatchIndex]
+                                        selectedImageUri = current.uri
+                                        selectedBitmap = current.bitmap
+                                        upscaledImageUri = current.resultUri
+                                        upscaledBitmap = current.resultBitmap
+                                    }
                                     sharedScale = 1f
                                     sharedOffsetX = 0f
                                     sharedOffsetY = 0f
                                 },
+                                enabled = !isUpscaling,
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
                                     .padding(8.dp),
@@ -484,7 +615,7 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
                     }
                 }
 
-                val fabEnabled = selectedBitmap != null && !isUpscaling
+                val fabEnabled = imageQueue.isNotEmpty() && !isUpscaling
                 val fabContainerColor by animateColorAsState(
                     targetValue = if (fabEnabled) {
                         MaterialTheme.colorScheme.primaryContainer
@@ -650,8 +781,16 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
                     progress = fraction,
                     modifier = Modifier.size(72.dp),
                 )
+                val batchText = if (imageQueue.size > 1) {
+                    "Image ${currentBatchIndex + 1}/${imageQueue.size}"
+                } else {
+                    ""
+                }
                 Text(
-                    text = "${(fraction * 100).toInt()}%  $current/$total",
+                    text = buildString {
+                        if (batchText.isNotEmpty()) append("$batchText  ")
+                        append("${(fraction * 100).toInt()}%  $current/$total")
+                    },
                     style = MaterialTheme.typography.bodyLarge.copy(
                         fontFeatureSettings = "tnum",
                     ),
@@ -659,14 +798,31 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
                 )
             } else {
                 ContainedLoadingIndicator()
-                if (currentLog.isNotEmpty()) {
-                    Text(
-                        text = currentLog,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = FontFamily.Monospace,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
+                val batchText = if (imageQueue.size > 1) {
+                    "Image ${currentBatchIndex + 1}/${imageQueue.size}"
+                } else {
+                    ""
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (batchText.isNotEmpty()) {
+                        Text(
+                            text = batchText,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontFeatureSettings = "tnum",
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    if (currentLog.isNotEmpty()) {
+                        Text(
+                            text = currentLog,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = FontFamily.Monospace,
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
                 }
             }
         }
@@ -763,50 +919,89 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
                     showUpscalerDialog = false
 
                     val targetScale = tempSelectedScale
-                    selectedBitmap?.let { bitmap ->
-                        tileProgress = null
-                        currentLog = ""
-                        isUpscaling = true
-                        scope.launch {
-                            try {
-                                val resultBitmap = performUpscale(
-                                    context = context,
-                                    bitmap = bitmap,
-                                    upscalerId = selectedUpscaler.id,
-                                    targetScale = targetScale,
-                                    backendHost = backendHost,
-                                    remoteUpscalerPath = if (isRemote) {
-                                        remoteRepository.upscalerPaths[selectedUpscaler.id]
-                                    } else {
-                                        null
-                                    },
-                                )
-                                upscaledBitmap = resultBitmap
+                    val itemsToProcess = imageQueue
+                    batchInProgress = true
+                    isUpscaling = true
+                    tileProgress = null
+                    currentLog = ""
+                    scope.launch {
+                        try {
+                            for (i in currentBatchIndex until itemsToProcess.size) {
+                                val item = itemsToProcess[i]
+                                currentBatchIndex = i
+                                selectedImageUri = item.uri
+                                selectedBitmap = item.bitmap
+                                upscaledImageUri = null
+                                upscaledBitmap = null
+                                tileProgress = null
+                                currentLog = ""
 
-                                resultBitmap.let { bmp ->
-                                    withContext(Dispatchers.IO) {
-                                        try {
-                                            val tempFile = File(
-                                                context.cacheDir,
-                                                "upscaled_temp_${System.currentTimeMillis()}.jpg",
-                                            )
-                                            FileOutputStream(tempFile).use { out ->
-                                                bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                                try {
+                                    val resultBitmap = performUpscale(
+                                        context = context,
+                                        bitmap = item.bitmap,
+                                        upscalerId = selectedUpscaler.id,
+                                        targetScale = targetScale,
+                                        backendHost = backendHost,
+                                        remoteUpscalerPath = if (isRemote) {
+                                            remoteRepository.upscalerPaths[selectedUpscaler.id]
+                                        } else {
+                                            null
+                                        },
+                                    )
+                                    upscaledBitmap = resultBitmap
+                                    imageQueue = imageQueue.mapIndexed { idx, qItem ->
+                                        if (idx == i) qItem.copy(resultBitmap = resultBitmap) else qItem
+                                    }
+
+                                    resultBitmap.let { bmp ->
+                                        withContext(Dispatchers.IO) {
+                                            try {
+                                                val tempFile = File(
+                                                    context.cacheDir,
+                                                    "upscaled_temp_${System.currentTimeMillis()}.jpg",
+                                                )
+                                                FileOutputStream(tempFile).use { out ->
+                                                    bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                                                }
+                                                val resultUri = Uri.fromFile(tempFile)
+                                                upscaledImageUri = resultUri
+                                                imageQueue = imageQueue.mapIndexed { idx, qItem ->
+                                                    if (idx == i) qItem.copy(resultUri = resultUri) else qItem
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.e("UpscaleScreen", "Failed to save temp file", e)
                                             }
-                                            upscaledImageUri = Uri.fromFile(tempFile)
-                                        } catch (e: Exception) {
-                                            Log.e("UpscaleScreen", "Failed to save temp file", e)
                                         }
                                     }
+
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(R.string.upscale_complete_toast, i + 1, itemsToProcess.size),
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
+                                } catch (e: Exception) {
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(
+                                            context,
+                                            msgUpscaleFailed.format(e.message ?: "Unknown error"),
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
                                 }
-                            } catch (e: Exception) {
-                                Toast.makeText(
-                                    context,
-                                    msgUpscaleFailed.format(e.message ?: "Unknown error"),
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            } finally {
-                                isUpscaling = false
+                            }
+                        } finally {
+                            isUpscaling = false
+                            batchInProgress = false
+                            if (imageQueue.isNotEmpty()) {
+                                val last = imageQueue.last()
+                                selectedImageUri = last.uri
+                                selectedBitmap = last.bitmap
+                                upscaledImageUri = last.resultUri
+                                upscaledBitmap = last.resultBitmap
+                                currentBatchIndex = imageQueue.size - 1
                             }
                         }
                     }
@@ -826,6 +1021,13 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
         )
     }
 }
+
+data class UpscaleImageItem(
+    val uri: Uri,
+    val bitmap: Bitmap,
+    var resultUri: Uri? = null,
+    var resultBitmap: Bitmap? = null,
+)
 
 sealed class BackendState {
     object Idle : BackendState()
