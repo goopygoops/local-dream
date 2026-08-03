@@ -79,7 +79,7 @@ internal suspend fun tokenizePromptRequest(
             val json = JSONObject(payload)
             TokenizeResult(
                 count = json.optInt("count", 0),
-                maxLength = json.optInt("max_length", 77),
+                maxLength = json.optInt("max_length", 500),
                 overflowOffset = json.optInt("overflow_offset", -1),
             )
         }
