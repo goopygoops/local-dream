@@ -10,6 +10,7 @@ jobs:
     env:
       ANDROID_NDK_ROOT: ${{ github.workspace }}/android-ndk
       QNN_SDK_ROOT: ${{ github.workspace }}/qnn-sdk
+      HAS_QNN_SDK: ${{ secrets.QNN_SDK_URL != '' }}
 
     steps:
       - name: Checkout
@@ -43,12 +44,21 @@ jobs:
             "cmake;3.22.1"
 
       - name: Download QNN SDK
+        if: ${{ env.HAS_QNN_SDK }}
         run: |
-          echo "QNN_SDK_URL is not set, skipping"
+          mkdir -p $QNN_SDK_ROOT
+          curl -L "${{ secrets.QNN_SDK_URL }}" -o /tmp/qnn_sdk.tar.gz
+          tar -xzf /tmp/qnn_sdk.tar.gz -C $QNN_SDK_ROOT --strip-components=1
+          echo "QNN_SDK_ROOT=$QNN_SDK_ROOT" >> $GITHUB_ENV
+          echo "QNN SDK version: $(ls $QNN_SDK_ROOT)"
 
       - name: Build native library
+        if: ${{ env.HAS_QNN_SDK }}
+        working-directory: app/src/main/cpp
         run: |
-          echo "QNN_SDK_URL is not set, skipping"
+          export QNN_SDK_ROOT=$QNN_SDK_ROOT
+          export ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT
+          bash build.sh
 
       - name: Build APK
         run: |
