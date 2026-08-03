@@ -37,9 +37,9 @@ jobs:
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
             "platform-tools" \
-            "platforms;android-37" \
+            "platforms;android-35" \
             "build-tools;34.0.0" \
             "ndk;28.0.13003508" \
             "cmake;3.22.1"
 
-      - run: echo "hello"
+      - run: echo "SDK installed"
