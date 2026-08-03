@@ -43,7 +43,7 @@ jobs:
             "cmake;3.22.1"
 
       - name: Download QNN SDK
-        if: ${{ secrets.QNN_SDK_URL != '' }}
+        if: ${{ secrets.QNN_SDK_URL }}
         run: |
           mkdir -p $QNN_SDK_ROOT
           curl -L "${{ secrets.QNN_SDK_URL }}" -o /tmp/qnn_sdk.tar.gz
@@ -52,7 +52,7 @@ jobs:
           echo "QNN SDK version: $(ls $QNN_SDK_ROOT)"
 
       - name: Build native library
-        if: ${{ secrets.QNN_SDK_URL != '' }}
+        if: ${{ secrets.QNN_SDK_URL }}
         working-directory: app/src/main/cpp
         run: |
           export QNN_SDK_ROOT=$QNN_SDK_ROOT
