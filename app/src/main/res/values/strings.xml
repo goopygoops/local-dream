@@ -344,6 +344,8 @@
     <string name="upscaled_image">Upscaled Image</string>
     <string name="click_to_add_image">Tap to add image for upscaling</string>
     <string name="image_resolution_too_large">Image resolution too large (%1$d×%2$d), please select an image smaller than 2048x2048</string>
+    <string name="upscale_complete_toast">Upscaled %1$d/%2$d</string>
+    <string name="remove">Remove</string>
     <string name="failed_to_load_image">Failed to load image: %s</string>
     <string name="model_download_channel">Model Downloads</string>
     <string name="model_download_channel_desc">Notifications for model download progress</string>

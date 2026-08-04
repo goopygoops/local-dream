@@ -69,7 +69,7 @@ internal class PromptFieldController(
     val redoEnabled: Boolean get() = redoStack.isNotEmpty()
 
     var tokenCount by mutableIntStateOf(2)
-    var tokenMax by mutableIntStateOf(77)
+    var tokenMax by mutableIntStateOf(500)
 
     // UTF-16 index from which the text exceeds the token limit, or -1 when it
     // fits. Drives the greyed-out overflow hint in the field.

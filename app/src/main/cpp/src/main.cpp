@@ -661,8 +661,8 @@ static void registerTokenizeEndpoint(httplib::Server &svr,
       auto json = nlohmann::json::parse(req.body);
       std::string text = json.value("prompt", std::string());
       // Anima counts with the T5 tokenizer against the context length (512),
-      // far longer than CLIP's 77.
-      const int max_len = text_encoder->isAnima() ? anima_text_seq_len : 77;
+      // far longer than CLIP's 500.
+      const int max_len = text_encoder->isAnima() ? anima_text_seq_len : 500;
 
       TokenizeInfo info = text_encoder->tokenizeInfo(text, max_len);
 

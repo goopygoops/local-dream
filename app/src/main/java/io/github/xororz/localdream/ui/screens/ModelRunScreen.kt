@@ -646,7 +646,7 @@ fun ModelRunScreen(
 
     val onBatchCountsChange = remember {
         { value: Float ->
-            batchCounts = value.roundToInt().coerceIn(1, 10)
+            batchCounts = value.roundToInt().coerceIn(1, 500)
             saveAllFields()
         }
     }

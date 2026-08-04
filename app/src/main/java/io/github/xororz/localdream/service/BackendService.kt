@@ -167,7 +167,10 @@ class BackendService : Service() {
         // Commands only declare intent; the single backend thread converges the
         // actual process to it via reconcile(). This keeps every start/stop
         // ordered and race-free regardless of how fast the screen comes and goes.
-        when (intent?.action) {
+        if (intent == null) {
+            return START_STICKY
+        }
+        when (intent.action) {
             ACTION_STOP -> serviceScope.launch { requestStop(startId) }
 
             // Foreground promotion only; no backend change.
@@ -180,7 +183,7 @@ class BackendService : Service() {
             }
         }
 
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     private fun parseConfig(intent: Intent?): BackendConfig? {
